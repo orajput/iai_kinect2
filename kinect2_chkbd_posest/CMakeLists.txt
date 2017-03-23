@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(kinect2_calibration CXX)
+project(kinect2_chkbd_posest CXX)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBT_USE_DOUBLE_PRECISION -Wall")
 # Unused warnings
@@ -19,11 +19,15 @@ ELSE()
   MESSAGE(ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
 ENDIF()
 
-find_package(catkin REQUIRED COMPONENTS roscpp rostime std_msgs sensor_msgs message_filters cv_bridge image_transport compressed_image_transport compressed_depth_image_transport kinect2_bridge)
+find_package(catkin REQUIRED COMPONENTS roscpp rostime std_msgs sensor_msgs message_filters cv_bridge image_transport compressed_image_transport compressed_depth_image_transport kinect2_bridge kinect2_calibration tf rt_msgs)
+
+MESSAGE (STATUS "kinect2_calibration_INCLUDE_DIR: ${kinect2_calibration_INCLUDE_DIR}")
 
 ## System dependencies are found with CMake's conventions
 find_package(OpenCV REQUIRED)
 find_package(OpenMP)
+find_package(Eigen3)
+include_directories(${EIGEN3_INCLUDE_DIR})
 
 if(OPENMP_FOUND)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
@@ -42,18 +46,13 @@ endif()
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-#catkin_package(
+catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES kinect2_bridge
-#  CATKIN_DEPENDS other_catkin_pkg
-#  DEPENDS system_lib
-#)
-catkin_package(
-  INCLUDE_DIRS include
-#  LIBRARIES kinect2_bridge
-#  CATKIN_DEPENDS kinect2_bridge
+  CATKIN_DEPENDS roscpp std_msgs rt_msgs
 #  DEPENDS system_lib
 )
+
 ###########
 ## Build ##
 ###########
@@ -70,10 +69,11 @@ include_directories(include
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${kinect2_bridge_INCLUDE_DIR}
+  ${kinect2_calibration_INCLUDE_DIR}
 )
 
-add_executable(kinect2_calibration src/kinect2_calibration.cpp)
-target_link_libraries(kinect2_calibration
+add_executable(kinect2_chkbd_posest src/chkbd_posest.cpp)
+target_link_libraries(kinect2_chkbd_posest
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
 )

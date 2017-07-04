@@ -80,8 +80,6 @@ private:
   std::mutex lockRegLowRes, lockRegHighRes, lockRegSD;
 
   bool publishTF;
-  bool syncImages;
-  bool usePlayback;
   std::thread tfPublisher, mainThread;
 
   libfreenect2::Freenect2 freenect2;
@@ -102,6 +100,8 @@ private:
   bool nextColor, nextIrDepth;
   double deltaT, depthShift, elapsedTimeColor, elapsedTimeIrDepth;
   bool running, deviceActive, clientConnected, isSubscribedColor, isSubscribedDepth;
+  bool syncImages;
+  bool usePlayback;
 
   message_filters::Subscriber<sensor_msgs::Image> ir_subscriber;
   message_filters::Subscriber<sensor_msgs::Image> depth_subscriber;
@@ -343,6 +343,9 @@ private:
     }
 
     initCalibration(calib_path, sensor);
+
+    priv_nh.setParam("depth_shift", depthShift);
+    priv_nh.setParam("sensor", sensor);
 
     if(!initRegistration(reg_method, reg_dev, maxDepth))
     {
@@ -1698,7 +1701,7 @@ private:
     cv::Mat color;
     convertImageMessageToOpenCv(rgb_msg, color, sensor_msgs::image_encodings::BGR8);
 
-    std_msgs::Header header;
+    std_msgs::Header header(ir_msg->header);
     std::vector<cv::Mat> images(COUNT);
     std::vector<Status> status = this->status;
 

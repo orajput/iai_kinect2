@@ -116,12 +116,8 @@ private:
 
     DEPTH_SD,
     DEPTH_SD_RECT,
-
     DEPTH_HD,
     DEPTH_QHD,
-
-    IR_QHD,
-    IR_QHD_RECT,
 
     COLOR_SD_RECT,
     COLOR_HD,
@@ -535,9 +531,7 @@ private:
     topics[DEPTH_SD] = K2_TOPIC_SD K2_TOPIC_IMAGE_DEPTH;
     topics[DEPTH_SD_RECT] = K2_TOPIC_SD K2_TOPIC_IMAGE_DEPTH K2_TOPIC_IMAGE_RECT;
     topics[DEPTH_HD] = K2_TOPIC_HD K2_TOPIC_IMAGE_DEPTH K2_TOPIC_IMAGE_RECT;
-    topics[DEPTH_QHD] = K2_TOPIC_QHD K2_TOPIC_IMAGE_IR;
-    topics[IR_QHD] = K2_TOPIC_QHD K2_TOPIC_IMAGE_IR K2_TOPIC_IMAGE_RECT;
-        topics[IR_QHD_RECT] = K2_TOPIC_QHD K2_TOPIC_IMAGE_DEPTH K2_TOPIC_IMAGE_RECT;
+    topics[DEPTH_QHD] = K2_TOPIC_QHD K2_TOPIC_IMAGE_DEPTH K2_TOPIC_IMAGE_RECT;
 
     topics[COLOR_SD_RECT] = K2_TOPIC_SD K2_TOPIC_IMAGE_COLOR K2_TOPIC_IMAGE_RECT;
 
@@ -1217,7 +1211,7 @@ private:
       cv::Mat(depthFrame->height, depthFrame->width, CV_32FC1, depthFrame->data).copyTo(depth);
     }
 
-    if(status[IR_SD] || status[IR_SD_RECT] || status[IR_QHD] || status[IR_QHD_RECT])
+    if(status[IR_SD] || status[IR_SD_RECT])
     {
       ir = cv::Mat(irFrame->height, irFrame->width, CV_32FC1, irFrame->data);
       ir.convertTo(images[IR_SD], CV_16U);
@@ -1395,18 +1389,6 @@ private:
     if(status[IR_SD_RECT])
     {
       cv::remap(images[IR_SD], images[IR_SD_RECT], map1Ir, map2Ir, cv::INTER_AREA);
-    }
-    if(status[IR_QHD])
-    {
-      lockRegLowRes.lock();
-      depthRegLowRes->registerDepth(images[IR_SD], images[IR_QHD]);
-      lockRegLowRes.unlock();
-    }
-    if(status[IR_QHD_RECT])
-    {
-      lockRegLowRes.lock();
-      depthRegLowRes->registerDepth(images[IR_SD_RECT], images[IR_QHD_RECT]);
-      lockRegLowRes.unlock();
     }
 
     // DEPTH
@@ -1596,8 +1578,6 @@ private:
     case DEPTH_SD_RECT:
     case DEPTH_HD:
     case DEPTH_QHD:
-    case IR_QHD:
-    case IR_QHD_RECT:
       msgImage.encoding = sensor_msgs::image_encodings::TYPE_16UC1;
       break;
     case COLOR_SD_RECT:
@@ -1638,8 +1618,6 @@ private:
     case DEPTH_SD_RECT:
     case DEPTH_HD:
     case DEPTH_QHD:
-    case IR_QHD:
-    case IR_QHD_RECT:
       msgImage.format = compression16BitString;
       cv::imencode(compression16BitExt, image, msgImage.data, compressionParams);
       break;

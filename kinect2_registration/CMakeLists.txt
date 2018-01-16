@@ -128,7 +128,9 @@ if(DEPTH_REG_OPENCL)
   set(MODULE_LIBS ${MODULE_LIBS} ${OpenCL_LIBRARIES})
 endif()
 
-add_library(kinect2_registration SHARED src/kinect2_registration.cpp ${MODULES})
+set(MODULES ${MODULES} src/color_registration_cpu.cpp)
+
+add_library(kinect2_registration SHARED src/kinect2_registration.cpp src/kinect2_color_registration.cpp ${MODULES})
 target_link_libraries(kinect2_registration
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}

@@ -60,6 +60,7 @@
 
 #include <kinect2_bridge/kinect2_definitions.h>
 #include <kinect2_registration/kinect2_registration.h>
+#include <kinect2_registration/kinect2_color_registration.h>
 #include <kinect2_registration/kinect2_console.h>
 
 class Kinect2Bridge
@@ -93,6 +94,7 @@ private:
   ros::NodeHandle nh, priv_nh;
 
   DepthRegistration *depthRegLowRes, *depthRegHighRes;
+  ColorRegistration *colorReg;
 
   size_t frameColor, frameIrDepth, frameAll, pubFrameColor, pubFrameIrDepth, pubFrameAll;
   ros::Time lastColor, lastDepth;
@@ -225,6 +227,7 @@ public:
 
     delete depthRegLowRes;
     delete depthRegHighRes;
+    delete colorReg;
 
     for(size_t i = 0; i < COUNT; ++i)
     {
@@ -409,6 +412,26 @@ private:
     {
       delete depthRegLowRes;
       delete depthRegHighRes;
+      return false;
+    }
+
+    colorReg = ColorRegistration::New(ColorRegistration::CPU);
+
+//    cv::Mat rotationInv, translationInv;
+//    rotationInv = cv::Mat::eye(3, 3, CV_64F);
+//    translationInv = cv::Mat::zeros(3, 1, CV_64F);
+//    rotationInv = rotation.inv();
+//    translationInv = (-1)*translation;
+
+//    if(!colorReg->init(cameraMatrixColor, sizeColor, cameraMatrixDepth, sizeIr, distortionDepth, rotation, translation, 0.5f, maxDepth, device))
+//    {
+//      delete colorReg;
+//      return false;
+//    }
+
+    if(!colorReg->init(cameraMatrixDepth, sizeIr, cameraMatrixColor, sizeColor, distortionColor, rotation, translation, 0.5f, maxDepth, device))
+    {
+      delete colorReg;
       return false;
     }
 
@@ -1135,7 +1158,7 @@ private:
       lockRegSD.unlock();
     }
 
-    if(status[COLOR_HD] || status[COLOR_HD_RECT] || status[COLOR_QHD] || status[COLOR_QHD_RECT] ||
+    if(status[COLOR_HD] || status[COLOR_HD_RECT] || status[COLOR_QHD] || status[COLOR_QHD_RECT] || status[COLOR_SD_RECT] ||
        status[MONO_HD] || status[MONO_HD_RECT] || status[MONO_QHD] || status[MONO_QHD_RECT])
     {
       cv::Mat tmp;
@@ -1276,7 +1299,7 @@ private:
       this->color.format = colorFrame->format;
       lockRegSD.unlock();
     }
-    if(status[COLOR_HD] || status[COLOR_HD_RECT] || status[COLOR_QHD] || status[COLOR_QHD_RECT] ||
+    if(status[COLOR_HD] || status[COLOR_HD_RECT] || status[COLOR_QHD] || status[COLOR_QHD_RECT] || status[COLOR_SD_RECT] ||
        status[MONO_HD] || status[MONO_HD_RECT] || status[MONO_QHD] || status[MONO_QHD_RECT])
     {
       cv::Mat tmp;
@@ -1358,8 +1381,16 @@ private:
     return header;
   }
 
-  void processIrDepth(const cv::Mat &depth, std::vector<cv::Mat> &images, const std::vector<Status> &status)
+  void processIrDepthTwo(const cv::Mat &depth, std::vector<cv::Mat> &images, const std::vector<Status> &status)
   {
+    cv::Mat depthShifted;
+    depth.convertTo(depthShifted, CV_16U, 1, depthShift);
+    cv::flip(depthShifted, depthShifted, 1);
+
+    cv::Mat depthFlipped;
+    depth.convertTo(depthFlipped, CV_16U, 1, 0);
+    cv::flip(depthFlipped, depthFlipped, 1);
+
     // COLOR registered to depth
     if(status[COLOR_SD_RECT])
     {
@@ -1379,6 +1410,12 @@ private:
       {
         cv::cvtColor(tmp, images[COLOR_SD_RECT], CV_RGBA2BGR);
       }
+
+      cv::remap(images[COLOR_HD], images[COLOR_HD_RECT], map1Color, map2Color, cv::INTER_AREA);
+      cv::remap(depthShifted, images[DEPTH_SD_RECT], map1Ir, map2Ir, cv::INTER_NEAREST);
+
+      cv::remap(depthShifted, images[DEPTH_SD_RECT], map1Ir, map2Ir, cv::INTER_NEAREST);
+      colorReg->registerColor(images[DEPTH_SD_RECT], images[COLOR_HD], images[COLOR_SD_RECT]);
     }
 
     // IR
@@ -1392,7 +1429,8 @@ private:
     }
 
     // DEPTH
-    cv::Mat depthShifted;
+    //cv::Mat depthShifted;
+    // cv::flip(depthShifted, depthShifted, 1);
     if(status[DEPTH_SD])
     {
       depth.convertTo(images[DEPTH_SD], CV_16U, 1);
@@ -1400,8 +1438,11 @@ private:
     }
     if(status[DEPTH_SD_RECT] || status[DEPTH_QHD] || status[DEPTH_HD])
     {
-      depth.convertTo(depthShifted, CV_16U, 1, depthShift);
-      cv::flip(depthShifted, depthShifted, 1);
+//      depth.convertTo(depthShifted, CV_16U, 1, depthShift);
+//      cv::flip(depthShifted, depthShifted, 1);
+
+//      colorReg->registerColor(depthShifted, images[COLOR_HD], images[COLOR_SD_RECT]);
+//      std::cout << "Reg" << std::endl;
     }
     if(status[DEPTH_SD_RECT])
     {
@@ -1418,6 +1459,76 @@ private:
       lockRegHighRes.lock();
       depthRegHighRes->registerDepth(depthShifted, images[DEPTH_HD]);
       lockRegHighRes.unlock();
+    }
+  }
+
+
+
+  void processIrDepth(const cv::Mat &depth, std::vector<cv::Mat> &images, const std::vector<Status> &status)
+  {
+//    ORIGINAL COLOR REGISTRATION
+//    // COLOR registered to depth
+//    if(status[COLOR_SD_RECT])
+//    {
+//      cv::Mat tmp;
+//      libfreenect2::Frame depthFrame(sizeIr.width, sizeIr.height, 4, depth.data);
+//      libfreenect2::Frame undistorted(sizeIr.width, sizeIr.height, 4);
+//      libfreenect2::Frame registered(sizeIr.width, sizeIr.height, 4);
+//      lockRegSD.lock();
+//      registration->apply(&color, &depthFrame, &undistorted, &registered);
+//      lockRegSD.unlock();
+//      cv::flip(cv::Mat(sizeIr, CV_8UC4, registered.data), tmp, 1);
+//      if(color.format == libfreenect2::Frame::BGRX)
+//      {
+//        cv::cvtColor(tmp, images[COLOR_SD_RECT], CV_BGRA2BGR);
+//      }
+//      else
+//      {
+//        cv::cvtColor(tmp, images[COLOR_SD_RECT], CV_RGBA2BGR);
+//      }
+//    }
+
+    // IR
+    if(status[IR_SD] || status[IR_SD_RECT])
+    {
+      cv::flip(images[IR_SD], images[IR_SD], 1);
+    }
+    if(status[IR_SD_RECT])
+    {
+      cv::remap(images[IR_SD], images[IR_SD_RECT], map1Ir, map2Ir, cv::INTER_AREA);
+    }
+
+    // DEPTH
+    cv::Mat depthShifted;
+    if(status[DEPTH_SD] || status[COLOR_SD_RECT])
+    {
+      depth.convertTo(images[DEPTH_SD], CV_16U, 1);
+      cv::flip(images[DEPTH_SD], images[DEPTH_SD], 1);
+    }
+    if(status[DEPTH_SD_RECT] || status[DEPTH_QHD] || status[DEPTH_HD] || status[COLOR_SD_RECT])
+    {
+      depth.convertTo(depthShifted, CV_16U, 1, depthShift);
+      cv::flip(depthShifted, depthShifted, 1);
+    }
+    if(status[DEPTH_SD_RECT] || status[COLOR_SD_RECT])
+    {
+      cv::remap(depthShifted, images[DEPTH_SD_RECT], map1Ir, map2Ir, cv::INTER_NEAREST);
+    }
+    if(status[DEPTH_QHD])
+    {
+      lockRegLowRes.lock();
+      depthRegLowRes->registerDepth(depthShifted, images[DEPTH_QHD]);
+      lockRegLowRes.unlock();
+    }
+    if(status[DEPTH_HD])
+    {
+      lockRegHighRes.lock();
+      depthRegHighRes->registerDepth(depthShifted, images[DEPTH_HD]);
+      lockRegHighRes.unlock();
+    }
+    if(status[COLOR_SD_RECT])
+    {
+      colorReg->registerColor(images[DEPTH_SD_RECT], images[COLOR_HD], images[COLOR_SD_RECT]);
     }
   }
 
@@ -1715,7 +1826,7 @@ private:
       this->color.format = libfreenect2::Frame::RGBX;
       lockRegSD.unlock();
     }
-    if(status[COLOR_HD] || status[COLOR_HD_RECT] || status[COLOR_QHD] || status[COLOR_QHD_RECT] ||
+    if(status[COLOR_HD] || status[COLOR_HD_RECT] || status[COLOR_QHD] || status[COLOR_QHD_RECT] || status[COLOR_SD_RECT] ||
        status[MONO_HD] || status[MONO_HD_RECT] || status[MONO_QHD] || status[MONO_QHD_RECT])
     {
       cv::cvtColor(color, images[COLOR_HD], CV_BGRA2BGR);

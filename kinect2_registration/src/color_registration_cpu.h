@@ -23,9 +23,9 @@ public:
   bool registerColor(const cv::Mat &depth, const cv::Mat& color, cv::Mat& colorRegistered) override;
 
 private:
+
   void createLookup();
-  void remapColor(const cv::Mat &color, cv::Mat &colorScaled) const;
-  void projectColor(const cv::Mat& depth, const cv::Mat &colorScaled, cv::Mat &colorRegistered) const;
+  void projectColor(const cv::Mat& depth, const cv::Mat &color, cv::Mat &colorRegistered) const;
 };
 
 #endif //__COLOR_REGISTRATION_CPU_H__

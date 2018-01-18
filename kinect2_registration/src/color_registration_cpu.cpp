@@ -1,6 +1,11 @@
 #include "color_registration_cpu.h"
 #include <kinect2_registration/kinect2_console.h>
 
+inline bool isWithinMat(int x, int y, const cv::Mat& image)
+{
+  return (x >= 0 && x < image.cols && y >= 0 && y < image.rows);
+}
+
 ColorRegistrationCPU::ColorRegistrationCPU()
   : ColorRegistration()
 {
@@ -62,94 +67,112 @@ void ColorRegistrationCPU::createLookup()
   }
 }
 
-void ColorRegistrationCPU::remapColor(const cv::Mat &color, cv::Mat &colorScaled) const
+void ColorRegistrationCPU::projectColor(const cv::Mat& depth, const cv::Mat &color, cv::Mat &colorRegistered) const
 {
-  colorScaled.create(sizeDepth, CV_8UC3);
+  const double fxColor = cameraMatrixColor.at<double>(0, 0);
+  const double fyColor = cameraMatrixColor.at<double>(1, 1);
+  const double cxColor = cameraMatrixColor.at<double>(0, 2) + 0.5;
+  const double cyColor = cameraMatrixColor.at<double>(1, 2) + 0.5;
 
-  cv::remap(color, colorScaled, mapX, mapY, cv::INTER_LINEAR);
-}
+  // depth filter size in x direction
+  const size_t filter_width = 5;
 
-void ColorRegistrationCPU::projectColor(const cv::Mat& depth, const cv::Mat &colorScaled, cv::Mat &colorRegistered) const
-{
-    cv::Mat colorIdx = cv::Mat::zeros(sizeDepth, CV_16UC3);
+  // depth filter size in y direction
+  const size_t filter_height = 3;
 
-    const double fxColor = cameraMatrixDepth.at<double>(0, 0);
-    const double fyColor = cameraMatrixDepth.at<double>(1, 1);
-    const double cxColor = cameraMatrixDepth.at<double>(0, 2) + 0.5;
-    const double cyColor = cameraMatrixDepth.at<double>(1, 2) + 0.5;
+  // relative depth tolerance for duplicate pixels
+  const float filterTolerance = 0.03;
 
-    #pragma omp parallel for
-    for(size_t r = 0; r < (size_t)sizeDepth.height; ++r)
+  // holds corresponding color pixel coordinate in depth image (x)
+  // initialized with invalid pixel cordinate
+  cv::Mat depthToColorPixelMapX = cv::Mat(sizeDepth, CV_16UC1, cv::Scalar(std::numeric_limits<unsigned short>::max()));
+
+  // holds corresponding color pixel coordinate in depth image (x)
+  // initialized with invalid pixel cordinate
+  cv::Mat depthToColorPixelMapY = cv::Mat(sizeDepth, CV_16UC1, cv::Scalar(std::numeric_limits<unsigned short>::max()));
+
+  // holds minimal depth for pixels in neighbood for color image
+  cv::Mat minimalDepthMap = cv::Mat(sizeColor, CV_16UC1, cv::Scalar(std::numeric_limits<unsigned short>::max()));
+
+  // collect depth to color pixel mapping
+  for(size_t r = 0; r < (size_t)sizeDepth.height; ++r)
+  {
+    const uint16_t *itD = depth.ptr<uint16_t>(r);
+    const double y = lookupY.at<double>(0, r);
+    const double *itX = lookupX.ptr<double>();
+
+    for(size_t c = 0; c < (size_t)sizeDepth.width; ++c, ++itD, ++itX)
     {
-      const uint16_t *itD = depth.ptr<uint16_t>(r);
-      const double y = lookupY.at<double>(0, r);
-      const double *itX = lookupX.ptr<double>();
+      const double depthValue = *itD / 1000.0;
 
-      for(size_t c = 0; c < (size_t)sizeDepth.width; ++c, ++itD, ++itX)
+      if(depthValue < zNear || depthValue > zFar)
       {
-        const double depthValue = *itD / 1000.0;
+        continue;
+      }
 
-        if(depthValue < zNear || depthValue > zFar)
+      // transform points from depth frame to color frame
+      Eigen::Vector4d pointD(*itX * depthValue, y * depthValue, depthValue, 1);
+      Eigen::Vector4d pointP = proj * pointD;
+      const double z = pointP[2];
+      const double invZ = 1 / z;
+
+      // calculate color pixel coordinates from projection onto image plane
+      const int xColor = (fxColor * pointP[0]) * invZ + cxColor;
+      const int yColor = (fyColor * pointP[1]) * invZ + cyColor;
+
+      if (isWithinMat(xColor, yColor, color))
+      {
+        // store minimal depth for color pixel
+        if ((*itD < minimalDepthMap.at<uint16_t>(yColor,xColor)))
         {
-          continue;
+            minimalDepthMap.at<uint16_t>(yColor, xColor) = *itD;
         }
 
-        Eigen::Vector4d pointD(*itX * depthValue, y * depthValue, depthValue, 1);
-        Eigen::Vector4d pointP = proj * pointD;
+        // keep track of which color pixel is mapped to which depth pixel
+        depthToColorPixelMapX.at<uint16_t>(r,c) = xColor;
+        depthToColorPixelMapY.at<uint16_t>(r,c) = yColor;
+      }
+    }
+  }
 
-        const double z = pointP[2];
+  // minimum filter: spread minimal depth values in neighborhood
+  cv::Mat element(filter_height, filter_width, CV_16UC1,cv::Scalar(1));
+  cv::erode(minimalDepthMap, minimalDepthMap, element);
 
-        const double invZ = 1 / z;
-        const int xP = (fxColor * pointP[0]) * invZ + cxColor;
-        const int yP = (fyColor * pointP[1]) * invZ + cyColor;
+  // filter duplicate depth values to avoid ghosting/shadow effects in background regions
+  // -> only closest point (in terms of depth) and neighbors within a tolerance are kept
+  for(size_t r = 0; r < (size_t)sizeDepth.height; ++r)
+  {
+    const uint16_t *itD = depth.ptr<uint16_t>(r);
 
-        if(xP >= 0 && xP < sizeDepth.width && yP >= 0 && yP < sizeDepth.height)
+    for(size_t c = 0; c < (size_t)sizeDepth.width; ++c, ++itD)
+    {
+      const int depthToColorPixelX = depthToColorPixelMapX.at<uint16_t>(r,c);
+      const int depthToColorPixelY = depthToColorPixelMapY.at<uint16_t>(r,c);
+
+      if (isWithinMat(depthToColorPixelX, depthToColorPixelY, color) && (*itD > 0))
+      {
+        const uint16_t minDepth = minimalDepthMap.at<uint16_t>(depthToColorPixelY, depthToColorPixelX);
+        const uint16_t depth = *itD;
+
+        float depth_error = ((float)(depth - minDepth) / (float)depth);
+
+        // allow duplicate pixels within a relative depth tolerance
+        if ((depth_error < filterTolerance))
         {
-          cv::Vec3b& cReg = colorRegistered.at<cv::Vec3b>(r, c);
-
-          if (colorIdx.at<cv::Vec3s>(yP,xP)[2] == 0)
-          {
-            // no corresponding depth pixel assigned yet
-
-            colorIdx.at<cv::Vec3s>(yP,xP)[0] = r;
-            colorIdx.at<cv::Vec3s>(yP,xP)[1] = c;
-            colorIdx.at<cv::Vec3s>(yP,xP)[2] = *itD;
-            cReg = colorScaled.at<cv::Vec3b>(yP,xP);
-          }
-          else if (abs(*itD - colorIdx.at<cv::Vec3s>(yP,xP)[2]) < 50)
-          {
-            // pixel is within distance of 5 cm to currently assigned depth pixel
-            // -> allow reuse of color pixel
-
-            cReg = colorScaled.at<cv::Vec3b>(yP,xP);
-          }
-          else if (*itD < colorIdx.at<cv::Vec3s>(yP,xP)[2])
-          {
-            // pixel is closer to camera than currently assigned pixel
-            // replace pixel and clear previously used pixel
-
-              cReg = colorScaled.at<cv::Vec3b>(yP,xP);
-              colorRegistered.at<cv::Vec3b>(colorIdx.at<cv::Vec3s>(yP,xP)[0],colorIdx.at<cv::Vec3s>(yP,xP)[1])[0] = 0;
-              colorRegistered.at<cv::Vec3b>(colorIdx.at<cv::Vec3s>(yP,xP)[0],colorIdx.at<cv::Vec3s>(yP,xP)[1])[1] = 0;
-              colorRegistered.at<cv::Vec3b>(colorIdx.at<cv::Vec3s>(yP,xP)[0],colorIdx.at<cv::Vec3s>(yP,xP)[1])[2] = 0;
-              colorIdx.at<cv::Vec3s>(yP,xP)[0] = r;
-              colorIdx.at<cv::Vec3s>(yP,xP)[1] = c;
-              colorIdx.at<cv::Vec3s>(yP,xP)[2] = *itD;
-          }
-
+          colorRegistered.at<cv::Vec3b>(r, c) = color.at<cv::Vec3b>(depthToColorPixelY, depthToColorPixelX);
         }
       }
     }
+  }
 }
 
 
 bool ColorRegistrationCPU::registerColor(const cv::Mat &depth, const cv::Mat& color, cv::Mat& colorRegistered)
 {
-    colorRegistered = cv::Mat::zeros(sizeDepth, CV_8UC3);
-    cv::Mat colorScaled = cv::Mat::zeros(sizeDepth, CV_8UC3);
+  colorRegistered = cv::Mat::zeros(sizeDepth, CV_8UC3);
 
-    remapColor(color, colorScaled);
-    projectColor(depth, colorScaled, colorRegistered);
+  projectColor(depth, color, colorRegistered);
 
-    return true;
+  return true;
 }

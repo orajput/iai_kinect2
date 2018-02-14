@@ -580,7 +580,10 @@ private:
                 transformStampedTFToMsg(mrkTf, msgtf);
                 // RT TF publish
                 rt_tf_msg.rt_stamp = irStamp;
-                rt_tf_msg.transform_stamped = msgtf;
+                rt_tf_msg.transform = msgtf.transform;
+                rt_tf_msg.header = msgtf.header;
+                rt_tf_msg.child_frame_id = msgtf.child_frame_id;
+                rt_tf_msg.error.data = errRms;
                 rt_tf_pub.publish(rt_tf_msg);
 
                 std_msgs::Float64 err;

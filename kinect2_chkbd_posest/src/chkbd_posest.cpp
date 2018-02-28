@@ -45,6 +45,7 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/sync_policies/approximate_time.h>
 
 #include <kinect2_calibration/kinect2_calibration_definitions.h>
 #include <kinect2_bridge/kinect2_definitions.h>
@@ -96,11 +97,13 @@ private:
   bool doPlot;
 
   typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::Image> ColorIrDepthSyncPolicy;
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image> IrDepthSyncPolicy;
   ros::NodeHandle nh;
   ros::AsyncSpinner spinner;
   image_transport::ImageTransport it;
   image_transport::SubscriberFilter *subImageColor, *subImageIr, *subImageDepth;
   message_filters::Synchronizer<ColorIrDepthSyncPolicy> *sync;
+  message_filters::Synchronizer<IrDepthSyncPolicy> *syncIrDepth;
 
   ros::Publisher rot3dfit_error_publisher, rt_tf_pub;
 
@@ -180,11 +183,6 @@ private:
     subImageIr = new image_transport::SubscriberFilter(it, topicIr, 4, hints);
     subImageDepth = new image_transport::SubscriberFilter(it, topicDepth, 4, hints);
 
-    sync = new message_filters::Synchronizer<ColorIrDepthSyncPolicy>(ColorIrDepthSyncPolicy(4), *subImageColor, *subImageIr, *subImageDepth);
-    sync->registerCallback(boost::bind(&CalibBoardPoseEst::callback, this, _1, _2, _3));
-
-    spinner.start();
-
     bool ret = loadCalibration();
 
     if(ret)
@@ -194,6 +192,18 @@ private:
       cx = cameraMatrix.at<double>(0, 2);
       cy = cameraMatrix.at<double>(1, 2);
     }
+
+    if(mode == COLOR || mode == SYNC)
+    {
+      sync = new message_filters::Synchronizer<ColorIrDepthSyncPolicy>(ColorIrDepthSyncPolicy(4), *subImageColor, *subImageIr, *subImageDepth);
+      sync->registerCallback(boost::bind(&CalibBoardPoseEst::callback, this, _1, _2, _3));
+    }
+    else if(mode == IR)
+    {
+      syncIrDepth = new message_filters::Synchronizer<IrDepthSyncPolicy>(IrDepthSyncPolicy(4), *subImageIr, *subImageDepth);
+      syncIrDepth->registerCallback(boost::bind(&CalibBoardPoseEst::callbackIRDepth, this, _1, _2));
+    }
+    spinner.start();
   }
 
   void stopAcq()
@@ -256,6 +266,55 @@ private:
         maxIr = std::max(maxIr, (int) * it);
       }
     }
+  }
+
+  void callbackIRDepth(const sensor_msgs::Image::ConstPtr imageIr, const sensor_msgs::Image::ConstPtr imageDepth)
+  {
+    std::vector<cv::Point2f> pointsIr;
+    cv::Mat ir, irGrey, irScaled, depth;
+    ros::Time irStamp, depthStamp;
+
+    bool foundIr = false;
+
+    readImage(imageIr, ir);
+    readImage(imageDepth, depth);
+    irStamp = imageIr->header.stamp;
+    depthStamp = imageDepth->header.stamp;
+    cv::resize(ir, irScaled, cv::Size(), 2.0, 2.0, cv::INTER_CUBIC);
+
+    convertIr(irScaled, irGrey);
+
+    if(circleBoard)
+    {
+      foundIr = cv::findCirclesGrid(irGrey, boardDims, pointsIr, circleFlags);
+    }
+    else
+    {
+      const cv::TermCriteria termCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::COUNT, 100, DBL_EPSILON);
+
+      foundIr = cv::findChessboardCorners(irGrey, boardDims, pointsIr, cv::CALIB_CB_ADAPTIVE_THRESH);
+      if(foundIr)
+      {
+        cv::cornerSubPix(irGrey, pointsIr, cv::Size(11, 11), cv::Size(-1, -1), termCriteria);
+      }
+    }
+
+    if(foundIr)
+    {
+      // Update min and max ir value based on checkerboard values
+      findMinMax(irScaled, pointsIr);
+    }
+
+    lock.lock();
+    this->ir = ir;
+    this->irGrey = irGrey;
+    this->depth = depth;
+    this->foundIr = foundIr;
+    this->pointsIr = pointsIr;
+    this->irStamp = irStamp;
+    this->depthStamp = depthStamp;
+    update = true;
+    lock.unlock();
   }
 
   void callback(const sensor_msgs::Image::ConstPtr imageColor, const sensor_msgs::Image::ConstPtr imageIr, const sensor_msgs::Image::ConstPtr imageDepth)
@@ -839,6 +898,7 @@ int main(int argc, char **argv)
   std::string calib_path = "/home/omer/catkin_ws/src/iai_kinect2/kinect2_bridge/data/502442443142/";
   std::string base_name_tf = std::string(K2_DEFAULT_NS);
   bool doPlot = false;
+  bool useRectifiedImages = true;
 
   ros::init(argc, argv, "kinect2_calib", ros::init_options::AnonymousName);
 
@@ -872,6 +932,10 @@ int main(int argc, char **argv)
     else if(arg == "plot")
     {
       doPlot = true;
+    }
+    else if(arg == "norect")
+    {
+      useRectifiedImages = false;
     }
     else if(arg.find("circle") == 0 && arg.find('x') != arg.rfind('x') && arg.rfind('x') != std::string::npos)
     {
@@ -951,9 +1015,17 @@ int main(int argc, char **argv)
     }
   }
 
-  std::string topicColor = "/" + ns + K2_TOPIC_HD + K2_TOPIC_IMAGE_MONO + K2_TOPIC_IMAGE_RECT;
-  std::string topicIr = "/" + ns + K2_TOPIC_SD + K2_TOPIC_IMAGE_IR + K2_TOPIC_IMAGE_RECT;
-  std::string topicDepth = "/" + ns + K2_TOPIC_SD + K2_TOPIC_IMAGE_DEPTH + K2_TOPIC_IMAGE_RECT;
+  std::string topicColor = "/" + ns + K2_TOPIC_HD + K2_TOPIC_IMAGE_MONO;
+  std::string topicIr = "/" + ns + K2_TOPIC_SD + K2_TOPIC_IMAGE_IR;
+  std::string topicDepth = "/" + ns + K2_TOPIC_SD + K2_TOPIC_IMAGE_DEPTH;
+
+  if (useRectifiedImages)
+  {
+    topicColor = topicColor + K2_TOPIC_IMAGE_RECT;
+    topicIr = topicIr + K2_TOPIC_IMAGE_RECT;
+    topicDepth = topicDepth + K2_TOPIC_IMAGE_RECT;
+  }
+
   OUT_INFO("Start settings:" << std::endl
        << "     Source: " FG_CYAN << (source == COLOR ? "color" : (source == IR ? "ir" : "sync")) << NO_COLOR << std::endl
        << "      Board: " FG_CYAN << (circleBoard ? "circles" : "chess") << NO_COLOR << std::endl

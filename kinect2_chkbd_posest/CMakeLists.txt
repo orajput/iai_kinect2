@@ -78,6 +78,10 @@ target_link_libraries(kinect2_chkbd_posest
   ${OpenCV_LIBRARIES}
 )
 
+add_dependencies(kinect2_chkbd_posest
+  ${catkin_EXPORTED_TARGETS}
+)
+
 #############
 ## Install ##
 #############

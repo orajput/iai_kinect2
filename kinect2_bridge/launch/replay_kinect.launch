@@ -28,6 +28,7 @@
   <arg name="respawn"           default="true"/>
   <arg name="use_nodelet"       default="true"/>
   <arg name="output"            default="screen"/>
+  <arg name="playback_rate_factor"      default="1"/>
 
   <machine name="localhost" address="localhost" if="$(arg use_machine)"/>
 	
@@ -82,10 +83,10 @@
     <param name="bilateral_filter"  type="bool"   value="$(arg bilateral_filter)"/>
     <param name="edge_aware_filter" type="bool"   value="$(arg edge_aware_filter)"/>
     <param name="worker_threads"    type="int"    value="$(arg worker_threads)"/>
-	<param name="use_playback"      type="bool"   value="true"/>
+    <param name="use_playback"      type="bool"   value="true"/>
   </node>
 
-  <node pkg="rosbag" type="play" name="player" output="screen" args="--clock $(arg bag_file) $(arg rosbag_args)">
+  <node pkg="rosbag" type="play" name="player" output="screen" args="--clock --rate=$(arg playback_rate_factor) $(arg bag_file) $(arg rosbag_args)">
     <remap from="/kinect2/hd/image_color/compressed" to="/kinect2_playback/hd/image_color/compressed"/>
 	<remap from="/kinect2/sd/image_ir/compressed" to="/kinect2_playback/sd/image_ir/compressed"/>
 	<remap from="/kinect2/sd/image_depth/compressed" to="/kinect2_playback/sd/image_depth/compressed"/>

@@ -53,7 +53,7 @@
 #include <Eigen/Geometry>
 #include <opencv2/core/eigen.hpp>
 #include <tf/transform_broadcaster.h>
-#include "rt_msgs/TransformRTStamped.h"
+#include "rt_msgs/TransformRTStampedWithHeader.h"
 
 enum Source
 {
@@ -144,7 +144,7 @@ public:
     clahe = cv::createCLAHE(1.5, cv::Size(32, 32));
 
     rot3dfit_error_publisher = nh.advertise<std_msgs::Float64>("/rot3dfit_error", 1);
-    rt_tf_pub = nh.advertise<rt_msgs::TransformRTStamped>(rt_tf_topic, 1);
+    rt_tf_pub = nh.advertise<rt_msgs::TransformRTStampedWithHeader>(rt_tf_topic, 1);
   }
 
   ~CalibBoardPoseEst()
@@ -557,7 +557,7 @@ private:
     tf::Transform tZero(qZero, vZero);
     mrkTf = tf::StampedTransform(tZero, ros::Time::now(), base_name_tf + K2_TF_IR_OPT_FRAME, base_name_tf + "_calboard");
 
-    rt_msgs::TransformRTStamped rt_tf_msg;
+    rt_msgs::TransformRTStampedWithHeader rt_tf_msg;
     geometry_msgs::TransformStamped msgtf;
 
     std::chrono::milliseconds duration(1);

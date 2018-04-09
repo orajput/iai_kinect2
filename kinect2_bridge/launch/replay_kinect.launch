@@ -1,5 +1,4 @@
 <launch>
-  <param name="use_sim_time" value="true" />
 
   <arg name="bag_file"/>
   <arg name="sensor"/>
@@ -34,6 +33,8 @@
 
   <machine name="localhost" address="localhost" if="$(arg use_machine)"/>
 	
+  <param name="use_sim_time" value="true"/>
+
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager"
         if="$(arg start_manager)" machine="$(arg machine)" output="screen"/>
 

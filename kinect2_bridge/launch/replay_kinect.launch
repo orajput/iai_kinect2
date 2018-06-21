@@ -130,6 +130,6 @@
   </node>
 
   <node name="$(anon rviz)" pkg="rviz" type="rviz" respawn="false"
-        args="-d $(find kinect2_bridge)/launch/replay_config.rviz" output="screen">
+        args="-d $(find kinect2_bridge)/launch/replay_config.rviz" output="screen" if="$(arg launch_rviz)">
   </node>
 </launch>
